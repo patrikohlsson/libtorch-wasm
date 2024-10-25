@@ -38,6 +38,7 @@ jobs:
       run: |
         cmake -E copy ${{github.workspace}}/native/CMakeLists.txt ${{github.workspace}}/CMakeLists.txt
         cmake -B ${{github.workspace}}/build -DCAFFE2_PERF_WITH_AVX2=ON
+        cmake -E copy ${{github.workspace}}/resnet50.pt ${{github.workspace}}/build/resnet50.pt
 
     - name: Build
       # Build your program with the given configuration
