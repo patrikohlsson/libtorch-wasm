@@ -24,7 +24,13 @@ jobs:
 
     - name: Install dependencies
       # Install pytorch dependency
-      run: python3 -m pip install typing_extensions
+      run: |
+        python3 -m pip install typing_extensions
+        python3 -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+    - name: Export model
+      # Export the resnet50 example model
+      run: python3 export-model.py
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
