@@ -1,0 +1,107 @@
+diff --git a/aten/src/ATen/core/TensorBase.h b/aten/src/ATen/core/TensorBase.h
+index 2d202a6..d93cec2 100644
+--- a/aten/src/ATen/core/TensorBase.h
++++ b/aten/src/ATen/core/TensorBase.h
+@@ -307,7 +307,7 @@ class TORCH_API TensorBase {
+                 "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
+                 "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
+                 "equivalent dense tensor, multiply numel() by element_size()");
+-    return impl_->sym_numel() * impl_->itemsize();
++    return impl_->sym_numel() * c10::SymInt(impl_->itemsize());
+   }
+ 
+   int64_t numel() const {
+diff --git a/aten/src/ATen/native/AutogradComposite.cpp b/aten/src/ATen/native/AutogradComposite.cpp
+index dc98c90..a7de18b 100644
+--- a/aten/src/ATen/native/AutogradComposite.cpp
++++ b/aten/src/ATen/native/AutogradComposite.cpp
+@@ -46,7 +46,7 @@ Tensor _new_zeros_with_same_feature_meta(
+   auto other_sizes = other.sym_sizes();
+   auto other_strides = other.sym_strides();
+   auto other_storage_offset = other.storage_offset();
+-  auto other_storage_numel = other.storage().sym_nbytes() / other.itemsize();
++  auto other_storage_numel = other.storage().sym_nbytes() / c10::SymInt(other.itemsize());
+ 
+   if (self_num_batch_dims == 0) {
+     auto new_tensor = at::zeros_symint({other_storage_numel}, other.options());
+@@ -88,7 +88,7 @@ Tensor _new_zeros_with_same_feature_meta(
+ }
+ 
+ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
+-  return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
++  return base.storage().sym_nbytes() / c10::SymInt(base.itemsize()) == other.storage().sym_nbytes() / c10::SymInt(other.itemsize());
+ }
+ 
+ Tensor _lazy_clone(Tensor const& self) {
+diff --git a/aten/src/ATen/native/Resize.h b/aten/src/ATen/native/Resize.h
+index 951a08e..9edf738 100644
+--- a/aten/src/ATen/native/Resize.h
++++ b/aten/src/ATen/native/Resize.h
+@@ -87,7 +87,7 @@ inline void checkInBoundsForStorage(
+     const Storage& new_storage) {
+   T storage_size_bytes =
+       at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
+-  T storage_offset_bytes = storage_offset * data_type.itemsize();
++  T storage_offset_bytes = storage_offset * T(data_type.itemsize());
+   if (storage_size_bytes == 0) {
+     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
+     return;
+diff --git a/aten/src/ATen/native/TensorShape.cpp b/aten/src/ATen/native/TensorShape.cpp
+index 5959810..c64723e 100644
+--- a/aten/src/ATen/native/TensorShape.cpp
++++ b/aten/src/ATen/native/TensorShape.cpp
+@@ -3988,7 +3988,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
+   if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {
+     return self.clone();
+   }
+-  auto dtype_size = self.dtype().itemsize();
++  auto dtype_size = c10::SymInt(self.dtype().itemsize());
+   auto nbytes = self.storage().sym_nbytes();
+   TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
+   auto numel = nbytes / dtype_size;
+diff --git a/aten/src/ATen/native/quantized/cpu/qembeddingbag_unpack.cpp b/aten/src/ATen/native/quantized/cpu/qembeddingbag_unpack.cpp
+index 7c1093a..a68d54e 100644
+--- a/aten/src/ATen/native/quantized/cpu/qembeddingbag_unpack.cpp
++++ b/aten/src/ATen/native/quantized/cpu/qembeddingbag_unpack.cpp
+@@ -173,7 +173,7 @@ Tensor qembeddingbag_byte_unpack_meta(const Tensor& packed_weight) {
+   const auto input_columns = packed_weight_sizes[col_dim];
+   // The last 2 values are used to store the FP32 scale and zero_point values
+   // per row.
+-  const auto output_columns = input_columns - 2 * sizeof(float);
++  const auto output_columns = input_columns - 2 * c10::SymInt(sizeof(float));
+ 
+   auto output_shape = packed_weight_sizes.vec();
+   output_shape[col_dim] = output_columns;
+diff --git a/c10/macros/Macros.h b/c10/macros/Macros.h
+index ab6f2b3..3edbc30 100644
+--- a/c10/macros/Macros.h
++++ b/c10/macros/Macros.h
+@@ -411,12 +411,12 @@ __host__ __device__
+     // exactly how it is in glibc in case parts of the program are compiled with
+     // different NDEBUG settings. Otherwise we might get 'ambiguous declaration'
+     // error. Note: On ROCm - this declaration serves for host side compilation.
+-    void
++    _Noreturn void
+     __assert_fail(
+         const char* assertion,
+         const char* file,
+-        unsigned int line,
+-        const char* function) noexcept __attribute__((__noreturn__));
++        int line,
++        const char* function);
+ 
+ #endif // __SYCL_DEVICE_ONLY__
+ }
+diff --git a/torch/csrc/autograd/FunctionsManual.cpp b/torch/csrc/autograd/FunctionsManual.cpp
+index 3f24c6e..7adf351 100644
+--- a/torch/csrc/autograd/FunctionsManual.cpp
++++ b/torch/csrc/autograd/FunctionsManual.cpp
+@@ -2179,7 +2179,7 @@ Tensor split_backward(
+   auto num_splits = grads.size();
+   std::vector<c10::SymInt> split_sizes(num_splits, split_size);
+   split_sizes[num_splits - 1] =
+-      split_size - (split_size * num_splits - dim_size);
++      split_size - (split_size * c10::SymInt(num_splits) - dim_size);
+   return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
+ }
+ 
